@@ -61,6 +61,7 @@ end
 
 --local state_train, state_valid, state_test
 model = {}
+last_perplexity = 100000
 --local paramx, paramdx
 
 function lstm(i, prev_c, prev_h)
@@ -194,6 +195,11 @@ function run_valid()
     perp = perp + fp(state_valid)
   end
   print("Validation set perplexity : " .. g_f3(torch.exp(perp / len)))
+  if last_perplexity > perplexity then
+     print("model saved")
+     last_perplexity = perplexity
+     torch.save("model.net", model)
+  end
   g_enable_dropout(model.rnns)
 end
 
