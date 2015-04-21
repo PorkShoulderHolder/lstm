@@ -20,6 +20,7 @@ else
     cudaComputeCapability = deviceParams.major + deviceParams.minor/10
     LookupTable = nn.LookupTable
 end
+require('torch')
 require('nngraph')
 require('base')
 ptb = require('data')
@@ -211,6 +212,7 @@ function run_test()
     g_replace_table(model.s[0], model.s[1])
   end
   print("Test set perplexity : " .. g_f3(torch.exp(perp / (len - 1))))
+  torch.save("model.net", model)
   g_enable_dropout(model.rnns)
 end
 
