@@ -195,9 +195,9 @@ function run_valid()
     perp = perp + fp(state_valid)
   end
   print("Validation set perplexity : " .. g_f3(torch.exp(perp / len)))
-  if last_perplexity > perplexity then
+  if last_perplexity > torch.exp(perp / len) then
      print("model saved")
-     last_perplexity = perplexity
+     last_perplexity = torch.exp(perp / len)
      torch.save("model.net", model)
   end
   g_enable_dropout(model.rnns)
