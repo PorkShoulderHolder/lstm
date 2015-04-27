@@ -25,6 +25,7 @@ require('io')
 require('torch')
 require('nngraph')
 require('base')
+require('xlua')
 ptb = require('data')
 
 -- Train 1 day and gives 82 perplexity.
@@ -61,10 +62,10 @@ function transfer_data(x)
   return x:cuda()
 end
 
---local state_train, state_valid, state_test
+local state_train, state_valid, state_test
 model = {}
 last_perplexity = 100000
---local paramx, paramdx
+local paramx, paramdx
 
 function lstm(i, prev_c, prev_h)
   local function new_input_sum()
@@ -111,9 +112,14 @@ function create_network()
   return transfer_data(module)
 end
 
-function setup()
+function setup(file)
   print("Creating a RNN LSTM network.")
-  local core_network = create_network()
+  local core_network = nil
+  if file then
+    core_network = torch.load(file)
+  else
+    core_network = create_network()
+  end
   paramx, paramdx = core_network:getParameters()
   model.s = {}
   model.ds = {}
@@ -134,14 +140,6 @@ function setup()
   model.err = transfer_data(torch.zeros(params.seq_length))
 end
 
-function reset_state(state)
-  state.pos = 1
-  if model ~= nil and model.start_s ~= nil then
-    for d = 1, 2 * params.layers do
-      model.start_s[d]:zero()
-    end
-  end
-end
 
 function reset_ds()
   for d = 1, #model.ds do
@@ -190,8 +188,7 @@ end
 
 function query_sentences()
    -- read form std:in
-   local line = io.read("*line")
-   
+   local line = io.read("*line") 
 end
 
 function run_valid()
@@ -203,10 +200,11 @@ function run_valid()
     perp = perp + fp(state_valid)
   end
   print("Validation set perplexity : " .. g_f3(torch.exp(perp / len)))
+
   if last_perplexity > torch.exp(perp / len) then
-     print("model saved")
      last_perplexity = torch.exp(perp / len)
-     torch.save("model.net", model)
+     torch.save("model.net", model.core_network)
+     print("model saved")
   end
   g_enable_dropout(model.rnns)
 end
@@ -218,6 +216,7 @@ function run_test()
   local len = state_test.data:size(1)
   g_replace_table(model.s[0], model.start_s)
   for i = 1, (len - 1) do
+    xlua.progress(i,len - 1)
     local x = state_test.data[i]
     local y = state_test.data[i + 1]
     local s = model.s[i - 1]
@@ -226,38 +225,7 @@ function run_test()
     g_replace_table(model.s[0], model.s[1])
   end
   print("Test set perplexity : " .. g_f3(torch.exp(perp / (len - 1))))
-  torch.save("model.net", model)
   g_enable_dropout(model.rnns)
-end
-
---function main()
-  local module           = nn.gModule({x, y, prev_s},
-                                      {err, nn.Identity()(next_s)})
-  module:getParameters():uniform(-params.init_weight, params.init_weight)
-  return transfer_data(module)
-end
-
-function setup()
-  print("Creating a RNN LSTM network.")
-  local core_network = create_network()
-  paramx, paramdx = core_network:getParameters()
-  model.s = {}
-  model.ds = {}
-  model.start_s = {}
-  for j = 0, params.seq_length do
-    model.s[j] = {}
-    for d = 1, 2 * params.layers do
-      model.s[j][d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
-    end
-  end
-  for d = 1, 2 * params.layers do
-    model.start_s[d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
-    model.ds[d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
-  end
-  model.core_network = core_network
-  model.rnns = g_cloneManyTimes(core_network, params.seq_length)
-  model.norm_dw = 0
-  model.err = transfer_data(torch.zeros(params.seq_length))
 end
 
 function reset_state(state)
@@ -269,19 +237,78 @@ function reset_state(state)
   end
 end
 
-function reset_ds()
-  for d = 1, #model.ds do
-    model.ds[d]:zero()
+function main()
+  g_init_gpu(arg)
+  state_train = {data=transfer_data(ptb.traindataset(params.batch_size))}
+  state_valid =  {data=transfer_data(ptb.validdataset(params.batch_size))}
+  state_test =  {data=transfer_data(ptb.testdataset(params.batch_size))}
+  print("Network parameters:")
+  print(params)
+  local states = {state_train, state_valid, state_test}
+  for _, state in pairs(states) do
+   reset_state(state)
   end
+  setup()
+  step = 0
+  epoch = 0
+  total_cases = 0
+  beginning_time = torch.tic()
+  start_time = torch.tic()
+  print("Starting training.")
+  words_per_step = params.seq_length * params.batch_size
+  epoch_size = torch.floor(state_train.data:size(1) / params.seq_length)
+  --perps
+  while epoch < params.max_max_epoch do
+   perp = fp(state_train)
+   if perps == nil then
+     perps = torch.zeros(epoch_size):add(perp)
+   end
+   perps[step % epoch_size + 1] = perp
+   step = step + 1
+   bp(state_train)
+   total_cases = total_cases + params.seq_length * params.batch_size
+   epoch = step / epoch_size
+   if step % torch.round(epoch_size / 10) == 10 then
+     wps = torch.floor(total_cases / torch.toc(start_time))
+     since_beginning = g_d(torch.toc(beginning_time) / 60)
+     print('epoch = ' .. g_f3(epoch) ..
+           ', train perp. = ' .. g_f3(torch.exp(perps:mean())) ..
+           ', wps = ' .. wps ..
+           ', dw:norm() = ' .. g_f3(model.norm_dw) ..
+           ', lr = ' ..  g_f3(params.lr) ..
+           ', since beginning = ' .. since_beginning .. ' mins.')
+   end
+   if step % epoch_size == 0 then
+     run_valid()
+     run_test()
+
+     if epoch > params.max_epoch then
+         params.lr = params.lr / params.decay
+     end
+   end
+   if step % 33 == 0 then
+     cutorch.synchronize()
+     collectgarbage()
+   end
+  end
+  run_test()
+  print("Training is over.")
 end
 
-function fp(state)
-  g_replace_table(model.s[0], model.start_s)
-  if state.pos + params.seq_length > state.data:size(1) then
-    reset_state(state)
-  end
-  for i = 1, params.seq_length do
-    local x = state.data[state.pos]
-    local y = state.data[state.pos + 1]
-    local s = model.s[i - 1]
-    model.err[i], model.s[i] = unpack(model.rnns[i]:forward({x, y, s}))
+if arg[1] == "train" then
+  main()
+end
+if arg[1] == "load" then
+  print("testing")
+  print(arg)
+  g_init_gpu(arg)
+  setup("model.net")
+  state_test =  {data=transfer_data(ptb.testdataset(params.batch_size))}
+  run_test()
+end
+if arg[1] == "generate" then
+  g_init_gpu(arg)
+  model = torch.load("model.net")
+  state_test = {data=transfer_data(ptb.testdataset(params.batch_size))}
+end
+

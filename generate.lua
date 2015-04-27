@@ -3,7 +3,7 @@ require("nngraph")
 require("base")
 
 -- start by loading the model and preparing it to be run forward
-model = torch.load("model.net","w")
+
 
 function run_test()
   reset_state(state_test)
