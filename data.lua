@@ -9,18 +9,18 @@
 local stringx = require('pl.stringx')
 local file = require('pl.file')
 
-local ptb_path = "./data/"
+ptb_path = "./data/"
+local options = {}
 
-local trainfn = ptb_path .. "ptb.train.txt"
-local testfn  = ptb_path .. "ptb.test.txt"
-local validfn = ptb_path .. "ptb.valid.txt"
---[[
-local trainfn = ptb_path .. "ptb.char.train.txt"
-local validfn = ptb_path .. "ptb.char.valid.txt"
---]]
+ trainfn = ptb_path .. "ptb.train.txt"
+ testfn  = ptb_path .. "ptb.test.txt"
+ validfn = ptb_path .. "ptb.valid.txt"
+
+
 
 local vocab_idx = 0
 local vocab_map = {}
+local inverse_map = {}
 
 -- Stacks replicated, shifted versions of x_inp
 -- into a single matrix of size x_inp:size(1) x batch_size.
@@ -36,19 +36,30 @@ local function replicate(x_inp, batch_size)
 end
 
 local function load_data(fname)
+   
+   -- map every unique word in the dataset to an index
+
    local data = file.read(fname)
    data = stringx.replace(data, '\n', '<eos>')
    data = stringx.split(data)
-   --print(string.format("Loading %s, size of data = %d", fname, #data))
    local x = torch.zeros(#data)
    for i = 1, #data do
       if vocab_map[data[i]] == nil then
          vocab_idx = vocab_idx + 1
+         inverse_map[vocab_idx] = data[i]
          vocab_map[data[i]] = vocab_idx
       end
       x[i] = vocab_map[data[i]]
    end
    return x
+end
+
+function word_for_index(index)
+  return inverse_map[index]
+end
+
+function index_for_word(word)
+  return vocab_map[word]
 end
 
 local function traindataset(batch_size, char)

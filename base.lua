@@ -67,12 +67,12 @@ function g_cloneManyTimes(net, T)
   return clones
 end
 
-function g_init_gpu(args)
-  local gpuidx = args
-  gpuidx = gpuidx[2] or 2
+function g_init_gpu(idx)
+  
+  gpuidx = idx or 1
   print(string.format("Using %s-th gpu", gpuidx))
   cutorch.setDevice(gpuidx)
-  g_make_deterministic(1)
+  --g_make_deterministic(1)
 end
 
 function g_make_deterministic(seed)
